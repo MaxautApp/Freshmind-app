@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestione Alimenti Domestici</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f9fafb;
+        }
+        .tab-active {
+            border-bottom-color: #3b82f6;
+            color: #3b82f6;
+        }
+        .tab-inactive {
+            border-bottom-color: transparent;
+            color: #6b7280;
+        }
+        .tab-inactive:hover {
+            color: #374151;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 50;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .notification-bar {
+            background: linear-gradient(to right, #fed7aa, #fecaca);
+        }
+        .expire-urgent { color: #dc2626; }
+        .expire-warning { color: #ea580c; }
+        .expire-soon { color: #d97706; }
+        .expire-safe { color: #059669; }
+        
+        /* Stili per il scanner QR */
+        #qr-reader {
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        
+        #qr-reader__camera_selection {
+            margin: 10px 0;
+        }
+        
+        .qr-scanner-container {
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .scanner-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 200px;
+            height: 200px;
+            border: 2px solid #3b82f6;
+            border-radius: 8px;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        .scanner-overlay::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            border: 2px solid rgba(59, 130, 246, 0.3);
+            border-radius: 8px;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .scanner-instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 14px;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div class="max-w-6xl mx-auto p-4 min-h-screen">
+        <div class="bg-white rounded-lg shadow-lg">
+            <!-- Header -->
+            <div class="p-6 border-b border-gray-200">
+                <h1 class="text-3xl font-bold text-gray-900 mb-2">🏠 Gestione Alimenti Domestici</h1>
+                <p class="text-gray-600">Organizza i tuoi alimenti, controlla le scadenze e trova ricette</p>
+            </div>
+
+            <!-- Notifications Bar -->
+            <div id="notificationBar" class="notification-bar p-4 border-b" style="display: none;">
+                <div class="flex items-center space-x-2">
+                    <span class="text-xl">🔔</span>
+                    <span class="font-semibold text-orange-800">Attenzione alle scadenze!</span>
+                </div>
+                <div id="notificationContent" class="mt-2 space-y-1"></div>
+            </div>
+
+            <!-- Navigation -->
+            <div class="flex border-b border-gray-200 overflow-x-auto">
+                <button onclick="showTab('scanner')" id="tab-scanner" class="flex items-center space-x-2 px-6 py-3 border-b-2 font-medium text-sm whitespace-nowrap tab-active">
+                    <span>📱</span><span>Scanner</span>
+                </button>
+                <button onclick="showTab('inventory')" id="tab-inventory" class="flex items-center space-x-2 px-6 py-3 border-b-2 font-medium text-sm whitespace-nowrap tab-inactive">
+                    <span>📦</span><span>Inventario</span>
+                </button>
+                <button onclick="showTab('expiry')" id="tab-expiry" class="flex items-center space-x-2 px-6 py-3 border-b-2 font-medium text-sm whitespace-nowrap tab-inactive">
+                    <span>📅</span><span>Scadenze</span>
+                </button>
+                <button onclick="showTab('recipes')" id="tab-recipes" class="flex items-center space-x-2 px-6 py-3 border-b-2 font-medium text-sm whitespace-nowrap tab-inactive">
+                    <span>👨‍🍳</span><span>Ricette</span>
+                </button>
+                <button onclick="showTab('voice')" id="tab-voice" class="flex items-center space-x-2 px-6 py-3 border-b-2 font-medium text-sm whitespace-nowrap tab-inactive">
+                    <span>🎤</span><span>Comandi</span>
+                </button>
+            </div>
+
+            <!-- Content Area -->
+            <div class="p-6">
+                <!-- Scanner Tab -->
+                <div id="content-scanner" class="tab-content">
+                    <div class="space-y-6">
+                        <div class="text-center">
+                            <h2 class="text-xl font-semibold mb-4">Scanner QR/Codice a Barre</h2>
+                            
+                            <!-- Camera Scanner -->
+                            <div id="scanner-section" class="space-y-4">
+                                <div class="qr-scanner-container mx-auto" style="max-width: 500px;">
+                                    <div id="qr-reader" style="display: none;"></div>
+                                    <div class="scanner-overlay" id="scanner-overlay" style="display: none;"></div>
+                                    <div class="scanner-instructions" id="scanner-instructions" style="display: none;">
+                                        Inquadra il codice QR o a barre
+                                    </div>
+                                </div>
+                                
+                                <div id="scanner-result" class="bg-green-50 border border-green-200 rounded-lg p-4" style="display: none;">
+                                    <h3 class="font-semibold text-green-800 mb-2">✅ Codice Rilevato!</h3>
+                                    <p id="scanned-code" class="text-green-700 font-mono"></p>
+                                    <button onclick="processScannedCode()" class="mt-3 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+                                        Aggiungi Prodotto
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Placeholder when camera not active -->
+                            <div id="camera-placeholder" class="mx-auto w-64 h-64 bg-gray-100 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-300">
+                                <div class="text-center">
+                                    <div class="text-6xl mb-4">📷</div>
+                                    <p class="text-gray-500">Scanner QR/EAN</p>
+                                    <p class="text-sm text-gray-400 mt-2">Attiva la fotocamera per iniziare</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex flex-col sm:flex-row justify-center gap-4">
+                            <button onclick="startScanner()" id="start-scanner-btn" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 flex items-center justify-center space-x-2">
+                                <span>📷</span><span>Avvia Scanner</span>
+                            </button>
+                            <button onclick="stopScanner()" id="stop-scanner-btn" class="bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 flex items-center justify-center space-x-2" style="display: none;">
+                                <span>⏹️</span><span>Ferma Scanner</span>
+                            </button>
+                            <button onclick="simulateScan()" class="bg-gray-600 text-white px-6 py-3 rounded-lg hover:bg-gray-700 flex items-center justify-center space-x-2">
+                                <span>🎯</span><span>Test Demo</span>
+                            </button>
+                            <button onclick="showAddModal()" class="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 flex items-center justify-center space-x-2">
+                                <span>➕</span><span>Aggiungi Manuale</span>
+                            </button>
+                        </div>
+                        
+                        <div class="bg-blue-50 p-4 rounded-lg">
+                            <h3 class="font-semibold text-blue-900 mb-2">📱 Funzionalità Scanner:</h3>
+                            <ul class="text-sm text-blue-800 space-y-1">
+                                <li>✅ <strong>Scanner Reale:</strong> Usa la fotocamera per leggere codici QR/EAN</li>
+                                <li>✅ <strong>Compatibile Mobile:</strong> Funziona su smartphone e tablet</li>
+                                <li>✅ <strong>Auto-riconoscimento:</strong> Rileva automaticamente i codici</li>
+                                <li>✅ <strong>Test Demo:</strong> Prova con codici simulati</li>
+                                <li>✅ <strong>Modalità Manuale:</strong> Inserimento tradizionale</li>
+                            </ul>
+                        </div>
+                        
+                        <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                            <h3 class="font-semibold text-yellow-800 mb-2">⚠️ Permessi Richiesti:</h3>
+                            <p class="text-sm text-yellow-700">
+                                Per usare lo scanner, il browser chiederà l'accesso alla fotocamera. 
+                                Clicca "Consenti" quando richiesto. Su mobile, assicurati di essere su <strong>HTTPS</strong> 
+                                per il corretto funzionamento.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Inventory Tab -->
+                <div id="content-inventory" class="tab-content" style="display: none;">
+                    <div class="space-y-6">
+                        <div class="flex justify-between items-center">
+                            <h2 class="text-xl font-semibold">Inventario Completo</h2>
+                            <div class="flex space-x-2">
+                                <button onclick="exportData()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center space-x-2">
+                                    <span>💾</span><span>Esporta CSV</span>
+                                </button>
+                                <button onclick="showAddModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center space-x-2">
+                                    <span>➕</span><span>Aggiungi</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="relative">
+                            <input type="text" id="searchInput" placeholder="Cerca prodotti..." onkeyup="filterProducts()"
+                                class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <span class="absolute left-3 top-3 text-gray-400">🔍</span>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <!-- Frigorifero -->
+                            <div class="bg-blue-50 p-4 rounded-lg">
+                                <div class="flex items-center space-x-2 mb-4">
+                                    <span class="text-blue-600">🧊</span>
+                                    <h3 class="font-semibold text-blue-900">Frigorifero</h3>
+                                    <span id="fridgeCount" class="bg-blue-200 text-blue-800 px-2 py-1 rounded-full text-xs">0</span>
+                                </div>
+                                <div id="fridgeItems" class="space-y-2"></div>
+                            </div>
+
+                            <!-- Dispensa -->
+                            <div class="bg-amber-50 p-4 rounded-lg">
+                                <div class="flex items-center space-x-2 mb-4">
+                                    <span class="text-amber-600">📦</span>
+                                    <h3 class="font-semibold text-amber-900">Dispensa</h3>
+                                    <span id="pantryCount" class="bg-amber-200 text-amber-800 px-2 py-1 rounded-full text-xs">0</span>
+                                </div>
+                                <div id="pantryItems" class="space-y-2"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Expiry Tab -->
+                <div id="content-expiry" class="tab-content" style="display: none;">
+                    <div class="space-y-6">
+                        <h2 class="text-xl font-semibold">Controllo Scadenze</h2>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div class="bg-red-50 p-4 rounded-lg border border-red-200">
+                                <h3 class="font-semibold text-red-900 mb-2">🚨 Scadono oggi/domani</h3>
+                                <div id="urgentExpiry" class="space-y-2"></div>
+                            </div>
+
+                            <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                                <h3 class="font-semibold text-yellow-900 mb-2">⏰ Scadono entro 3 giorni</h3>
+                                <div id="soonExpiry" class="space-y-2"></div>
+                            </div>
+
+                            <div class="bg-green-50 p-4 rounded-lg border border-green-200">
+                                <h3 class="font-semibold text-green-900 mb-2">✅ Prodotti sicuri</h3>
+                                <div id="safeProducts" class="space-y-2"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recipes Tab -->
+                <div id="content-recipes" class="tab-content" style="display: none;">
+                    <div class="space-y-6">
+                        <div class="flex justify-between items-center">
+                            <h2 class="text-xl font-semibold">Suggerimenti Ricette</h2>
+                            <button onclick="generateRecipes()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center space-x-2">
+                                <span>👨‍🍳</span><span>Genera Ricette</span>
+                            </button>
+                        </div>
+                        
+                        <div class="bg-blue-50 p-4 rounded-lg">
+                            <h3 class="font-semibold text-blue-900 mb-2">🍳 Ricette basate sui tuoi ingredienti</h3>
+                            <p class="text-sm text-blue-800">Clicca "Genera Ricette" per ottenere suggerimenti basati sui prodotti che hai in casa</p>
+                        </div>
+
+                        <div id="recipesContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                    </div>
+                </div>
+
+                <!-- Voice Commands Tab -->
+                <div id="content-voice" class="tab-content" style="display: none;">
+                    <div class="space-y-6">
+                        <h2 class="text-xl font-semibold">Comandi Vocali e Testuali</h2>
+                        
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <div class="flex items-center space-x-2 mb-4">
+                                <span class="text-blue-600">🎤</span>
+                                <span class="font-medium">Prova un comando:</span>
+                            </div>
+                            <div class="flex space-x-2">
+                                <input type="text" id="voiceInput" placeholder="Scrivi o pronuncia il tuo comando..."
+                                    class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    onkeypress="if(event.key==='Enter') executeCommand()">
+                                <button onclick="executeCommand()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Esegui</button>
+                            </div>
+                            <div id="commandResponse" class="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg" style="display: none;">
+                                <p class="text-green-800 font-medium">🤖 Risposta:</p>
+                                <p id="responseText" class="text-green-700"></p>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="bg-white p-4 rounded-lg border">
+                                <h3 class="font-semibold mb-3">💬 Comandi di Esempio</h3>
+                                <div class="space-y-2">
+                                    <button onclick="setCommand('Cosa scade oggi?')" class="w-full text-left p-2 bg-gray-50 rounded hover:bg-gray-100 text-sm">"Cosa scade oggi?"</button>
+                                    <button onclick="setCommand('Cosa c\\'è in frigo?')" class="w-full text-left p-2 bg-gray-50 rounded hover:bg-gray-100 text-sm">"Cosa c'è in frigo?"</button>
+                                    <button onclick="setCommand('Mostrami cosa ho in dispensa')" class="w-full text-left p-2 bg-gray-50 rounded hover:bg-gray-100 text-sm">"Mostrami cosa ho in dispensa"</button>
+                                    <button onclick="setCommand('Cosa posso cucinare stasera?')" class="w-full text-left p-2 bg-gray-50 rounded hover:bg-gray-100 text-sm">"Cosa posso cucinare stasera?"</button>
+                                    <button onclick="setCommand('Sposta la mozzarella in dispensa')" class="w-full text-left p-2 bg-gray-50 rounded hover:bg-gray-100 text-sm">"Sposta la mozzarella in dispensa"</button>
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-4 rounded-lg border">
+                                <h3 class="font-semibold mb-3">🎯 Funzionalità Disponibili</h3>
+                                <ul class="space-y-2 text-sm text-gray-700">
+                                    <li>• Controlla prodotti in scadenza</li>
+                                    <li>• Visualizza contenuto frigo/dispensa</li>
+                                    <li>• Genera suggerimenti di ricette</li>
+                                    <li>• Sposta prodotti tra posizioni</li>
+                                    <li>• Aggiungi nuovi prodotti vocalmente</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Product Modal -->
+    <div id="addModal" class="modal">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold">Aggiungi Prodotto</h3>
+                <button onclick="hideAddModal()" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Nome Prodotto</label>
+                    <input type="text" id="productName" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="es. Latte Intero">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Categoria</label>
+                    <select id="productCategory" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        <option value="">Seleziona categoria</option>
+                        <option value="Latticini">Latticini</option>
+                        <option value="Carne">Carne</option>
+                        <option value="Pesce">Pesce</option>
+                        <option value="Verdura">Verdura</option>
+                        <option value="Frutta">Frutta</option>
+                        <option value="Pasta/Riso">Pasta/Riso</option>
+                        <option value="Pane">Pane</option>
+                        <option value="Conserve">Conserve</option>
+                        <option value="Bevande">Bevande</option>
+                        <option value="Dolci">Dolci</option>
+                        <option value="Condimenti">Condimenti</option>
+                        <option value="Altro">Altro</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Posizione</label>
+                    <select id="productLocation" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        <option value="frigo">Frigorifero</option>
+                        <option value="dispensa">Dispensa</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Data di Scadenza</label>
+                    <input type="date" id="productExpiry" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Quantità</label>
+                    <input type="number" id="productQuantity" min="1" value="1" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Codice a Barre (opzionale)</label>
+                    <input type="text" id="productBarcode" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="es. 8001234567890">
+                </div>
+            </div>
+
+            <div class="flex space-x-3 mt-6">
+                <button onclick="hideAddModal()" class="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">Annulla</button>
+                <button onclick="addProduct()" class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Aggiungi</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Dati dell'applicazione
+        let products = [
+            {
+                id: 1,
+                name: 'Latte Intero',
+                category: 'Latticini',
+                location: 'frigo',
+                expiryDate: '2025-07-08',
+                quantity: 1,
+                barcode: '8001234567890'
+            },
+            {
+                id: 2,
+                name: 'Parmigiano Reggiano',
+                category: 'Latticini',
+                location: 'frigo',
+                expiryDate: '2025-08-15',
+                quantity: 1,
+                barcode: '8001234567891'
+            },
+            {
+                id: 3,
+                name: 'Pasta Penne',
+                category: 'Pasta/Riso',
+                location: 'dispensa',
+                expiryDate: '2025-12-31',
+                quantity: 2,
+                barcode: '8001234567892'
+            },
+            {
+                id: 4,
+                name: 'Pomodori Pelati',
+                category: 'Conserve',
+                location: 'dispensa',
+                expiryDate: '2025-07-07',
+                quantity: 1,
+                barcode: '8001234567893'
+            },
+            {
+                id: 5,
+                name: 'Mozzarella',
+                category: 'Latticini',
+                location: 'frigo',
+                expiryDate: '2025-07-06',
+                quantity: 1,
+                barcode: '8001234567894'
+            }
+        ];
+
+        let currentTab = 'scanner';
+        let html5QrcodeScanner = null;
+        let isScanning = false;
+        let lastScannedCode = '';
+
+        // Funzioni per i tab
+        function showTab(tabName) {
+            // Nascondi tutti i contenuti
+            document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+            
+            // Rimuovi classe attiva da tutti i tab
+            document.querySelectorAll('[id^="tab-"]').forEach(el => {
+                el.classList.remove('tab-active');
+                el.classList.add('tab-inactive');
+            });
+            
+            // Mostra il contenuto del tab selezionato
+            document.getElementById('content-' + tabName).style.display = 'block';
+            
+            // Aggiungi classe attiva al tab selezionato
+            document.getElementById('tab-' + tabName).classList.remove('tab-inactive');
+            document.getElementById('tab-' + tabName).classList.add('tab-active');
+            
+            currentTab = tabName;
+            
+            // Ferma lo scanner se cambio tab
+            if (tabName !== 'scanner' && isScanning) {
+                stopScanner();
+            }
+            
+            // Aggiorna il contenuto in base al tab
+            if (tabName === 'inventory') {
+                updateInventoryDisplay();
+            } else if (tabName === 'expiry') {
+                updateExpiryDisplay();
+            }
+        }
+
+        // Scanner QR Functions
+        function startScanner() {
+            if (isScanning) return;
+            
+            const qrReaderElement = document.getElementById('qr-reader');
+            const placeholderElement = document.getElementById('camera-placeholder');
+            const startBtn = document.getElementById('start-scanner-btn');
+            const stopBtn = document.getElementById('stop-scanner-btn');
+            const overlay = document.getElementById('scanner-overlay');
+            const instructions = document.getElementById('scanner-instructions');
+            
+            // Nascondi placeholder e mostra scanner
+            placeholderElement.style.display = 'none';
+            qrReaderElement.style.display = 'block';
+            overlay.style.display = 'block';
+            instructions.style.display = 'block';
+            startBtn.style.display = 'none';
+            stopBtn.style.display = 'inline-flex';
+            
+            const config = { 
+                fps: 10, 
+                qrbox: { width: 250, height: 250 },
+                
